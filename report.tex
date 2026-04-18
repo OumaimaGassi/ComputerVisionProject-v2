@@ -1,0 +1,235 @@
+\documentclass[11pt,a4paper]{article}
+
+% ========================
+% Packages
+% ========================
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{caption}
+\usepackage{float}
+
+% ========================
+% Colors & Style
+% ========================
+\definecolor{uirblue}{RGB}{0,70,130}
+\definecolor{darkgray}{RGB}{60,60,60}
+\hypersetup{colorlinks=true, linkcolor=uirblue, urlcolor=uirblue, citecolor=uirblue}
+
+\titleformat{\section}{\large\bfseries\color{uirblue}}{\thesection.}{0.5em}{}[\vspace{-0.3em}\rule{\textwidth}{0.4pt}]
+\titleformat{\subsection}{\normalsize\bfseries\color{darkgray}}{\thesubsection.}{0.5em}{}
+
+% ========================
+% Header / Footer
+% ========================
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\textcolor{gray}{Project 1: Document Scanner}}
+\fancyhead[R]{\small\textcolor{gray}{Introduction to Computer Vision --- UIR 2026}}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% ========================
+% Title
+% ========================
+\title{
+    \vspace{-1.5cm}
+    {\Large\textbf{Document Scanner}}\\[0.3em]
+    {\normalsize Project 1 --- Introduction to Computer Vision}\\[0.2em]
+    {\normalsize International University of Rabat (UIR) --- ESIN}\\[0.2em]
+    {\normalsize Spring 2026}
+}
+\author{
+    \textbf{Benmouma Salma} \and \textbf{Gassi Oumaima}
+}
+\date{
+    \vspace{0.2em}
+    {\small Professor: Ilias TOUGUI \quad|\quad April 2026}
+}
+
+\begin{document}
+\maketitle
+\thispagestyle{fancy}
+
+% ========================
+% Abstract
+% ========================
+\begin{abstract}
+\noindent
+This report presents a complete document scanning pipeline implemented as part of the Introduction to Computer Vision course. The system automatically detects a document from a photograph, corrects its perspective distortion to obtain a flat top-down view, and enhances the result for improved readability. The solution is delivered as a Jupyter notebook with full pipeline visualization and an interactive GUI application built with Tkinter.
+\end{abstract}
+
+% ========================
+% 1. Introduction
+% ========================
+\section{Introduction}
+
+Document scanning is a fundamental application of computer vision that converts photographs of documents into clean, digital representations. The goal of this project is to implement a pipeline that performs three main tasks: (1)~detect the document contour in the image, (2)~correct its perspective to a flat top\nobreakdash-down view, and (3)~enhance the output for readability.
+
+Our pipeline follows an 8-step approach:
+
+\begin{center}
+\small
+\texttt{Input $\rightarrow$ Grayscale $\rightarrow$ Gaussian Blur $\rightarrow$ Canny Edges $\rightarrow$ Contour Detection $\rightarrow$ Corner Ordering $\rightarrow$ Perspective Warp $\rightarrow$ Enhancement $\rightarrow$ Output}
+\end{center}
+
+% ========================
+% 2. Approach
+% ========================
+\section{Approach}
+
+\subsection{Preprocessing (Linear Image Filtering)}
+
+The input image is first converted to grayscale to reduce dimensionality. We then apply a \textbf{Gaussian blur} with a $5 \times 5$ kernel to suppress noise. The Gaussian kernel is defined as:
+
+\begin{equation}
+G(x, y) = \frac{1}{2\pi\sigma^2} \, e^{-\frac{x^2 + y^2}{2\sigma^2}}
+\end{equation}
+
+This smoothing step is essential to prevent the edge detector from responding to noise.
+
+\subsection{Edge Detection (Szeliski 7.2.1)}
+
+We use the \textbf{Canny edge detector}, a multi-stage algorithm consisting of:
+\begin{enumerate}[nosep]
+    \item Gradient computation via Sobel operators ($G_x$, $G_y$)
+    \item Gradient magnitude: $|\nabla I| = \sqrt{G_x^2 + G_y^2}$
+    \item Non-maximum suppression to thin edges to single-pixel width
+    \item Hysteresis thresholding with two thresholds ($T_{\text{low}}=50$, $T_{\text{high}}=150$)
+\end{enumerate}
+
+We compare three threshold settings in the notebook to justify our default choice.
+
+\subsection{Contour Detection (Szeliski 7.3)}
+
+Using \texttt{cv2.findContours}, we extract all contours from the binary edge image. Each contour is simplified using the \textbf{Ramer--Douglas--Peucker algorithm} (\texttt{cv2.approxPolyDP}) with $\varepsilon = 0.02 \times \text{perimeter}$. The largest contour with exactly 4~vertices is selected as the document boundary. A minimum area threshold (5\% of image area) filters spurious detections.
+
+\subsection{Corner Ordering}
+
+The four detected corners must be in a consistent order $[\text{TL}, \text{TR}, \text{BR}, \text{BL}]$ for the perspective transform. We sort using:
+\begin{itemize}[nosep]
+    \item \textbf{Sum} $s = x + y$: $\arg\min(s) \to \text{TL}$, $\arg\max(s) \to \text{BR}$
+    \item \textbf{Difference} $d = y - x$: $\arg\min(d) \to \text{TR}$, $\arg\max(d) \to \text{BL}$
+\end{itemize}
+
+\subsection{Perspective Transform (Homography)}
+
+A \textbf{perspective transform} maps the detected quadrilateral to a rectangle via a $3 \times 3$ homography matrix $\mathbf{H}$:
+
+\begin{equation}
+\begin{bmatrix} x' \\ y' \\ w' \end{bmatrix}
+= \mathbf{H} \cdot
+\begin{bmatrix} x \\ y \\ 1 \end{bmatrix},
+\qquad
+\text{with final coordinates } \left(\frac{x'}{w'},\; \frac{y'}{w'}\right)
+\end{equation}
+
+We compute $\mathbf{H}$ using \texttt{cv2.getPerspectiveTransform} and apply \texttt{cv2.warpPerspective}. Output dimensions are derived from the maximum edge widths/heights of the quadrilateral.
+
+\subsection{Enhancement (Non-Linear Image Filtering)}
+
+We implement five enhancement techniques to handle different document types:
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Technique} & \textbf{Formula / Method} & \textbf{Best For} \\
+\midrule
+Histogram Equalization & CDF-based intensity redistribution & Low-contrast images \\
+CLAHE & Local adaptive equalization ($\text{clip}=2.0$) & Uneven exposure \\
+Adaptive Threshold & Local mean binarization ($\text{block}=11$) & Text documents \\
+Gamma Correction & $I_{\text{out}} = I_{\text{in}}^{\gamma}$, $\gamma=0.7$ & Dark images \\
+Sharpening & Convolution with Laplacian kernel & Blurry images \\
+\bottomrule
+\end{tabular}
+\caption{Enhancement techniques comparison.}
+\end{table}
+
+Adaptive thresholding is selected as the default for document scanning due to its robustness with uneven illumination.
+
+% ========================
+% 3. Challenges
+% ========================
+\section{Challenges and Solutions}
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Detection sensitivity:} Initial Canny thresholds failed on low-contrast backgrounds. \textit{Solution:} We tested three threshold combinations and provided interactive tuning via the GUI.
+    \item \textbf{Output dimensions:} Naive dimension computation caused cropping. \textit{Solution:} We use $\max(\text{top width},$ $\text{bottom width})$ and $\max(\text{left height},$ $\text{right height})$.
+    \item \textbf{File handling:} The initial glob pattern picked up non-image files. \textit{Solution:} Filtering by image extensions before processing.
+\end{enumerate}
+
+% ========================
+% 4. Results
+% ========================
+\section{Results}
+
+The pipeline was tested on three document types. All documents were successfully detected, warped, and enhanced:
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Input Image} & \textbf{Detected?} & \textbf{Output Size} & \textbf{Enhancement} \\
+\midrule
+\texttt{sample\_document\_1.png} & \checkmark & $700 \times 590$ & Adaptive Threshold \\
+\texttt{sample\_receipt.png} & \checkmark & $290 \times 630$ & Adaptive Threshold \\
+\texttt{sample\_bookpage.png} & \checkmark & $700 \times 570$ & Adaptive Threshold \\
+\bottomrule
+\end{tabular}
+\caption{Pipeline results on test images.}
+\end{table}
+
+The notebook visualizes all intermediate steps (grayscale, blur, edges, contours, corners, warp, enhancement) with side-by-side comparisons. A histogram analysis confirms the enhancement step improves the contrast distribution.
+
+The interactive \textbf{GUI application} (Tkinter) allows loading images, adjusting parameters in real-time, and saving scanned outputs.
+
+% ========================
+% 5. Course Concepts
+% ========================
+\section{Course Concepts Applied}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Course Lecture} & \textbf{Usage in Project} & \textbf{Reference} \\
+\midrule
+Linear Image Filtering & Gaussian blur preprocessing & Szeliski 3.1--3.2 \\
+Edge Detection & Canny edge detector & Szeliski 7.2.1 \\
+Boundary Detection & Contour analysis, approxPolyDP & Szeliski 7.3 \\
+Non-Linear Filtering & Histogram eq., adaptive threshold & Szeliski 3.3 \\
+\bottomrule
+\end{tabular}
+\caption{Course concepts and their application in the project.}
+\end{table}
+
+\noindent\textbf{New concepts explored:} Perspective Transform (Homography), Ramer--Douglas--Peucker algorithm, CLAHE, GUI development with Tkinter.
+
+% ========================
+% 6. Conclusion
+% ========================
+\section{Conclusion}
+
+We successfully implemented a complete document scanning pipeline covering all required tasks: preprocessing, edge detection, contour analysis, perspective correction, and enhancement. The project demonstrates strong application of course concepts while introducing new techniques such as homography and CLAHE. The system was validated on three document types, producing clean, readable outputs in all cases. The interactive GUI makes the tool practical for real-world use.
+
+% ========================
+% 7. Tools
+% ========================
+\section*{Tools and Libraries}
+\small
+Python 3.13, OpenCV 4.13.0, NumPy 2.4.0, Matplotlib 3.10.8, Pillow 12.0.0, Tkinter. Development: Jupyter Notebook, VS Code.
+
+\end{document}
